@@ -1,0 +1,80 @@
+# This file configures Charmcraft.
+# See https://canonical-charmcraft.readthedocs-hosted.com/en/stable/reference/files/charmcraft-yaml-file/
+type: charm
+name: reductstore-k8s
+title: ReductStore Charm
+summary: ReductStore is a time series object store for high-frequency unstructured data.
+description: |
+  This charm deploys ReductStore inside Kubernetes, with persistent storage and ingress support.
+links:
+  website: https://www.reduct.store
+  documentation: https://www.reduct.store/docs
+  contact: mailto:info@reduct.store
+  source: https://github.com/reductstore/reductstore-k8s
+
+# Documentation:
+# https://canonical-charmcraft.readthedocs-hosted.com/en/stable/howto/build-guides/select-platforms/
+base: ubuntu@22.04
+platforms:
+  amd64:
+  arm64:
+
+
+parts:
+  charm:
+    plugin: charm
+    source: .
+
+# Configuration options
+config:
+  options:
+    log-level:
+      description: |
+        Configures the log level of ReductStore.
+
+        Acceptable values are: "info", "debug", "warning", "error" and "critical"
+      default: "info"
+      type: string
+    license-path:
+      description: |
+        Path inside the container where the ReductStore license file is expected.
+       
+        Default is /reduct.lic
+      default: "/reduct.lic"
+      type: string
+    api-base-path:
+      type: string
+      default: ""
+      description: "Base path for the ReductStore API and UI, usually matches Traefik ingress prefix."
+
+
+
+# Workload container
+containers:
+  reductstore:
+    resource: reductstore-image
+    mounts:
+      - storage: data
+        location: /data
+    ports:
+      - containerPort: 8383
+
+resources:
+  reductstore-image:
+    type: oci-image
+    description: ReductStore container image
+    upstream-source: reduct/store:latest
+
+storage:
+  data:
+    type: filesystem
+    minimum-size: 10G
+    description: Persistent storage for ReductStore data
+
+requires:
+  ingress:
+    interface: ingress
+    limit: 1
+  catalogue:
+    interface: catalogue
+    optional: true
