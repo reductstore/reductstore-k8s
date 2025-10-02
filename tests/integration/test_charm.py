@@ -34,6 +34,8 @@ async def test_build_and_deploy(ops_test: OpsTest):
     }
 
     # Deploy, then wait for Active
+    if ops_test.model is None:
+        raise RuntimeError("Model is not available in ops_test")
     await ops_test.model.deploy(
         charm,
         resources=resources,
