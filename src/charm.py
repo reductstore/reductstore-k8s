@@ -16,6 +16,7 @@ from charms.traefik_k8s.v2.ingress import (
     IngressPerAppRevokedEvent,
 )
 from ops import StoredState
+from ops.model import BlockedStatus, ModelError
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class ReductstoreCharm(ops.CharmBase):
         # Persist last known ingress URL
         self._stored.set_default(ingress_url="")
 
-        # Observe pebble + config
+        # Observe pebble  config
         framework.observe(self.on["reductstore"].pebble_ready, self._on_reductstore_pebble_ready)
         framework.observe(self.on.config_changed, self._on_config_changed)
 
@@ -45,8 +46,14 @@ class ReductstoreCharm(ops.CharmBase):
         # Setup catalogue consumer
         self.catalogue = CatalogueConsumer(charm=self, item=self._catalogue_item)
 
+        # Check license on upgrade and status update
+        framework.observe(self.on.update_status, self._on_update_status)
+        framework.observe(self.on.upgrade_charm, self._on_update_status)
+
     def _on_reductstore_pebble_ready(self, event: ops.PebbleReadyEvent):
         container = event.workload
+        if not self._ensure_license(container, event):
+            return  # keep Blocked/Maintenance status
         container.add_layer("reductstore", self._pebble_layer, combine=True)
         container.replan()
         self.unit.status = ops.ActiveStatus()
@@ -59,6 +66,8 @@ class ReductstoreCharm(ops.CharmBase):
             return
         container = self.unit.get_container("reductstore")
         try:
+            if not self._ensure_license(container, event):
+                return  # keep Blocked/Maintenance status
             container.add_layer("reductstore", self._pebble_layer, combine=True)
             container.replan()
         except ops.pebble.ConnectionError:
@@ -121,6 +130,41 @@ class ReductstoreCharm(ops.CharmBase):
         url = parts._replace(path=path, query="", fragment="").geturl()
         logger.debug("public_ui_url: base=%s -> %s", base_url, url)
         return url
+
+    def _on_update_status(self, event: ops.UpdateStatusEvent):
+        container = self.unit.get_container("reductstore")
+        if container.can_connect():
+            self._ensure_license(container, event)
+
+    def _ensure_license(self, container: ops.Container, event: ops.HookEvent) -> bool:
+        """Fetch license and push it to license-path inside the container."""
+        if not container.can_connect():
+            self.unit.status = ops.MaintenanceStatus("waiting for Pebble API")
+            event.defer()
+            return False
+        lic_dst = cast(str, self.model.config.get("license-path") or "/reduct.lic")
+        try:
+            # raises ModelError if resource is not attached
+            res_path = self.model.resources.fetch("reductstore-license")
+        except ModelError as e:
+            self.unit.status = BlockedStatus("Attach resource 'reductstore-license'")
+            logger.warning("License resource missing: %s", e)
+            return False
+        except Exception as e:
+            self.unit.status = BlockedStatus(f"Attach resource 'reductstore-license': {e}")
+            logger.warning("License resource error: %s", e)
+            return False
+        try:
+            with open(res_path, "rb") as f:
+                container.push(
+                    lic_dst, f.read(), make_dirs=True, permissions=0o600, user="root", group="root"
+                )
+            logger.info("Pushed ReductStore license to %s", lic_dst)
+        except ops.pebble.APIError as e:
+            logger.error("Failed to push license: %s", e)
+            event.defer()
+            return False
+        return True
 
     @property
     def external_ui_url(self) -> str:

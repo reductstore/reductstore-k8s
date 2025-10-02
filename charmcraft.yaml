@@ -31,22 +31,21 @@ config:
     log-level:
       description: |
         Configures the log level of ReductStore.
-
         Acceptable values are: "info", "debug", "warning", "error" and "critical"
       default: "info"
       type: string
+
     license-path:
       description: |
         Path inside the container where the ReductStore license file is expected.
-       
         Default is /reduct.lic
       default: "/reduct.lic"
       type: string
+
     api-base-path:
       type: string
       default: ""
       description: "Base path for the ReductStore API and UI, usually matches Traefik ingress prefix."
-
 
 
 # Workload container
@@ -64,6 +63,10 @@ resources:
     type: oci-image
     description: ReductStore container image
     upstream-source: reduct/store:latest
+
+  reductstore-license:
+    type: file
+    description: ReductStore license file
 
 storage:
   data:

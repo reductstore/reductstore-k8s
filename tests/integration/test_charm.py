@@ -2,8 +2,8 @@
 # Copyright 2025 anthony
 # See LICENSE file for licensing details.
 
-import asyncio
 import logging
+import tempfile
 from pathlib import Path
 
 import aiohttp
@@ -19,30 +19,32 @@ APP_NAME = METADATA["name"]
 
 @pytest.mark.abort_on_fail
 async def test_build_and_deploy(ops_test: OpsTest):
-    """Build the charm-under-test and deploy it together with related charms.
-
-    Assert on the unit status before any relations/configurations take place.
-    """
-    # Build and deploy charm from local source folder
+    """Build the charm, deploy it with required resources, and verify the API."""
+    # Build charm from local source
     charm = await ops_test.build_charm(".")
+
+    # Create a temporary license file
+    with tempfile.NamedTemporaryFile("wb", delete=False) as tf:
+        tf.write(b"TEST-LICENSE")
+        lic_path = tf.name
+
     resources = {
-        "reductstore-image": METADATA["resources"]["reductstore-image"]["upstream-source"]
+        "reductstore-image": METADATA["resources"]["reductstore-image"]["upstream-source"],
+        "reductstore-license": lic_path,
     }
 
-    # Deploy the charm and wait for active/idle status
-    await asyncio.gather(
-        ops_test.model.deploy(
-            charm,
-            resources=resources,
-            application_name=APP_NAME,
-            config={"api-base-path": "/"},
-        ),
-        ops_test.model.wait_for_idle(
-            apps=[APP_NAME], status="active", raise_on_blocked=True, timeout=1000
-        ),
+    # Deploy, then wait for Active
+    await ops_test.model.deploy(
+        charm,
+        resources=resources,
+        application_name=APP_NAME,
+        config={"api-base-path": "/"},
+    )
+    await ops_test.model.wait_for_idle(
+        apps=[APP_NAME], status="active", raise_on_blocked=True, timeout=1000
     )
 
-    # API Check
+    # API check
     status = await ops_test.model.get_status()
     unit = status["applications"][APP_NAME]["units"][f"{APP_NAME}/0"]
     address = unit["address"]

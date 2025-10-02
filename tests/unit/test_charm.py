@@ -4,23 +4,48 @@
 # Learn more about testing at: https://juju.is/docs/sdk/testing
 
 import json
+from pathlib import Path
 
 import ops
 import ops.pebble
 from charms.catalogue_k8s.v1.catalogue import CatalogueConsumer
 from ops import testing
+from ops.model import ModelError
 from ops.testing import Relation, State
 
 from charm import ReductstoreCharm
 
 
-def test_reductstore_pebble_ready():
+def _stub_license_fetch(monkeypatch, charm, tmp_path: Path, content: bytes = b"LICENSE"):
+    """Monkeypatch charm.model.resources.fetch to return a real temp file path."""
+    lic = tmp_path / "license.key"
+    lic.write_bytes(content)
+
+    def _fake_fetch(name: str):
+        assert name == "reductstore-license"
+        return str(lic)
+
+    monkeypatch.setattr(charm.model.resources, "fetch", _fake_fetch, raising=False)
+
+
+def _stub_license_fetch_missing(monkeypatch, charm):
+    """Monkeypatch fetch to raise as if no resource was attached."""
+
+    def _raise_missing(name: str):
+        raise ModelError("resource not found")
+
+    monkeypatch.setattr(charm.model.resources, "fetch", _raise_missing, raising=False)
+
+
+def test_reductstore_pebble_ready(monkeypatch, tmp_path):
     ctx = testing.Context(ReductstoreCharm)
     container = testing.Container("reductstore", can_connect=True)
-
     state_in = testing.State(containers={container})
 
-    state_out = ctx.run(ctx.on.pebble_ready(container), state_in)
+    with ctx(ctx.on.pebble_ready(container), state_in) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        state_out = mgr.run()
+
     model_name = state_out.model.name
     app_name = "reductstore-k8s"
     updated_plan = state_out.get_container(container.name).plan
@@ -50,7 +75,7 @@ def test_reductstore_pebble_ready():
     assert state_out.unit_status == testing.ActiveStatus()
 
 
-def test_config_changed_valid_can_connect():
+def test_config_changed_valid_can_connect(monkeypatch, tmp_path):
     ctx = testing.Context(ReductstoreCharm)
     container = testing.Container("reductstore", can_connect=True)
     state_in = testing.State(
@@ -58,7 +83,9 @@ def test_config_changed_valid_can_connect():
         config={"log-level": "debug", "license-path": "/custom.lic", "api-base-path": "/newbase"},
     )
 
-    state_out = ctx.run(ctx.on.config_changed(), state_in)
+    with ctx(ctx.on.config_changed(), state_in) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        state_out = mgr.run()
 
     updated_plan = state_out.get_container(container.name).plan
     assert updated_plan.services["reductstore"].command == "reductstore"
@@ -84,7 +111,7 @@ def test_config_changed_valid_cannot_connect():
     assert isinstance(state_out.unit_status, testing.MaintenanceStatus)
 
 
-def test_config_changed_invalid():
+def test_config_changed_invalid(monkeypatch, tmp_path):
     ctx = testing.Context(ReductstoreCharm)
     container = testing.Container("reductstore", can_connect=True)
     invalid_level = "foobar"
@@ -92,13 +119,15 @@ def test_config_changed_invalid():
         containers={container}, config={"log-level": invalid_level, "license-path": "/x.lic"}
     )
 
-    state_out = ctx.run(ctx.on.config_changed(), state_in)
+    with ctx(ctx.on.config_changed(), state_in) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        state_out = mgr.run()
 
     assert isinstance(state_out.unit_status, testing.BlockedStatus)
     assert invalid_level in state_out.unit_status.message
 
 
-def test_catalogue_updated_on_ingress_ready(monkeypatch):
+def test_catalogue_updated_on_ingress_ready(monkeypatch, tmp_path):
     seen = []
 
     def fake_update(self, item):
@@ -116,6 +145,7 @@ def test_catalogue_updated_on_ingress_ready(monkeypatch):
     state_in = State(containers={container}, relations={ingress_rel}, leader=True)
 
     with ctx(ctx.on.relation_changed(ingress_rel), state_in) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
         out = mgr.run()
         charm = mgr.charm
         assert charm._stored.ingress_url == "http://example.test/"
@@ -126,7 +156,7 @@ def test_catalogue_updated_on_ingress_ready(monkeypatch):
     assert seen[-1].name == "ReductStore"
 
 
-def test_catalogue_cleared_on_ingress_revoked(monkeypatch):
+def test_catalogue_cleared_on_ingress_revoked(monkeypatch, tmp_path):
     seen = []
 
     def fake_update(self, item):
@@ -144,6 +174,7 @@ def test_catalogue_cleared_on_ingress_revoked(monkeypatch):
     state = State(containers={container}, relations={ingress_rel}, leader=True)
 
     with ctx(ctx.on.relation_changed(ingress_rel), state) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
         state = mgr.run()
         charm = mgr.charm
         assert mgr.charm._stored.ingress_url == "http://example.test/"
@@ -152,6 +183,7 @@ def test_catalogue_cleared_on_ingress_revoked(monkeypatch):
     rel_in_state = state.get_relation(ingress_rel.id)
 
     with ctx(ctx.on.relation_broken(rel_in_state), state) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
         out = mgr.run()
         charm = mgr.charm
         assert charm._stored.ingress_url == ""
@@ -159,3 +191,17 @@ def test_catalogue_cleared_on_ingress_revoked(monkeypatch):
 
     assert len(seen) >= 2
     assert seen[-1].url == ""
+
+
+def test_blocked_when_license_missing(monkeypatch):
+    """If the license resource isn't attached yet, charm should block with clear instruction."""
+    ctx = testing.Context(ReductstoreCharm)
+    container = testing.Container("reductstore", can_connect=True)
+    state_in = testing.State(containers={container})
+
+    with ctx(ctx.on.pebble_ready(container), state_in) as mgr:
+        _stub_license_fetch_missing(monkeypatch, mgr.charm)
+        out = mgr.run()
+
+    assert isinstance(out.unit_status, testing.BlockedStatus)
+    assert "reductstore-license" in out.unit_status.message
