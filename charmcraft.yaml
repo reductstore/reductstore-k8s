@@ -66,6 +66,7 @@ resources:
 
   reductstore-license:
     type: file
+    filename: reduct.lic
     description: ReductStore license file
 
 storage:
