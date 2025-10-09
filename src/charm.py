@@ -4,6 +4,7 @@
 
 """Kubernetes charm for ReductStore."""
 
+import json
 import logging
 from typing import cast
 from urllib.parse import urlsplit, urlunsplit
@@ -44,11 +45,11 @@ class ReductstoreCharm(ops.CharmBase):
         self.framework.observe(self.ingress.on.revoked, self._on_ingress_revoked)
 
         # Setup catalogue consumer
-        self.catalogue = CatalogueConsumer(charm=self, item=self._catalogue_item)
+        self.catalogue = CatalogueConsumer(charm=self)
 
         # Check license on upgrade and status update
         framework.observe(self.on.update_status, self._on_update_status)
-        framework.observe(self.on.upgrade_charm, self._on_update_status)
+        framework.observe(self.on.upgrade_charm, self._on_upgrade_charm)
 
     def _on_reductstore_pebble_ready(self, event: ops.PebbleReadyEvent):
         container = event.workload
@@ -57,6 +58,7 @@ class ReductstoreCharm(ops.CharmBase):
         container.add_layer("reductstore", self._pebble_layer, combine=True)
         container.replan()
         self.unit.status = ops.ActiveStatus()
+        self.catalogue.update_item(self._catalogue_item)
 
     def _on_config_changed(self, event: ops.ConfigChangedEvent):
         log_level = cast(str, self.model.config["log-level"]).lower()
@@ -135,6 +137,42 @@ class ReductstoreCharm(ops.CharmBase):
         container = self.unit.get_container("reductstore")
         if container.can_connect():
             self._ensure_license(container, event)
+
+    def _on_upgrade_charm(self, event: ops.UpgradeCharmEvent):
+        """Handle charm upgrade by restoring ingress state and updating catalogue."""
+        container = self.unit.get_container("reductstore")
+        if container.can_connect():
+            if not self._ensure_license(container, event):
+                return  # keep Blocked/Maintenance status
+
+        self._restore_ingress_state()
+        self.catalogue.update_item(self._catalogue_item)
+        self.unit.status = ops.ActiveStatus()
+
+    def _restore_ingress_state(self):
+        """Restore ingress URL from relation data if the ingress relation exists."""
+        if not self.ingress.relations:
+            logger.debug("No ingress relations found during upgrade")
+            return
+
+        for relation in self.ingress.relations:
+            if not relation.app:
+                continue
+
+            try:
+                ingress_data = relation.data[relation.app].get("ingress")
+                if ingress_data:
+                    data = json.loads(ingress_data)
+                    url = data.get("url")
+                    if url:
+                        self._stored.ingress_url = url
+                        logger.info("Restored ingress URL from relation: %s", url)
+                        return
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning("Failed to parse ingress data from relation: %s", e)
+                continue
+
+        logger.debug("No valid ingress URL found in relations during upgrade")
 
     def _ensure_license(self, container: ops.Container, event: ops.HookEvent) -> bool:
         """Fetch license and push it to license-path inside the container."""

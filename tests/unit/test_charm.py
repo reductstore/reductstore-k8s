@@ -205,3 +205,252 @@ def test_blocked_when_license_missing(monkeypatch):
 
     assert isinstance(out.unit_status, testing.BlockedStatus)
     assert "reductstore-license" in out.unit_status.message
+
+
+def test_ingress_url_initialization():
+    """Test that ingress_url is initialized to empty string."""
+    ctx = testing.Context(ReductstoreCharm)
+    container = testing.Container("reductstore", can_connect=True)
+    state_in = testing.State(containers={container})
+
+    with ctx(ctx.on.start(), state_in) as mgr:
+        charm = mgr.charm
+        assert charm._stored.ingress_url == ""
+
+
+def test_ingress_url_set_on_ingress_ready(monkeypatch, tmp_path):
+    """Test that ingress_url is correctly set when ingress becomes ready."""
+    ctx = testing.Context(ReductstoreCharm)
+    container = testing.Container("reductstore", can_connect=True)
+
+    test_cases = [
+        ("http://example.test", "http://example.test/"),
+        ("https://secure.example.com", "https://secure.example.com/"),
+        ("http://localhost:8080", "http://localhost:8080/"),
+        ("https://app.domain.org/path", "https://app.domain.org/path"),
+    ]
+
+    for test_url, expected_stored_url in test_cases:
+        ingress_rel = Relation(
+            "ingress",
+            remote_app_name="traefik",
+            remote_app_data={"ingress": json.dumps({"url": test_url})},
+        )
+        state_in = State(containers={container}, relations={ingress_rel}, leader=True)
+
+        with ctx(ctx.on.relation_changed(ingress_rel), state_in) as mgr:
+            _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+            state_out = mgr.run()
+            charm = mgr.charm
+
+            assert charm._stored.ingress_url == expected_stored_url
+            assert isinstance(state_out.unit_status, testing.ActiveStatus)
+            assert test_url in state_out.unit_status.message
+
+
+def test_ingress_url_cleared_on_revoke(monkeypatch, tmp_path):
+    """Test that ingress_url is cleared when ingress is revoked."""
+    ctx = testing.Context(ReductstoreCharm)
+    container = testing.Container("reductstore", can_connect=True)
+
+    ingress_rel = Relation(
+        "ingress",
+        remote_app_name="traefik",
+        remote_app_data={"ingress": json.dumps({"url": "https://test.example.com"})},
+    )
+    state = State(containers={container}, relations={ingress_rel}, leader=True)
+
+    with ctx(ctx.on.relation_changed(ingress_rel), state) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        state = mgr.run()
+        charm = mgr.charm
+        assert charm._stored.ingress_url == "https://test.example.com/"
+
+    rel_in_state = state.get_relation(ingress_rel.id)
+    with ctx(ctx.on.relation_broken(rel_in_state), state) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        state_out = mgr.run()
+        charm = mgr.charm
+
+        assert charm._stored.ingress_url == ""
+        assert isinstance(state_out.unit_status, testing.MaintenanceStatus)
+        assert "Waiting for ingress" in state_out.unit_status.message
+
+
+def test_external_urls_depend_on_ingress_url(monkeypatch, tmp_path):
+    """Test that external_api_url and external_ui_url depend on stored ingress_url."""
+    ctx = testing.Context(ReductstoreCharm)
+    container = testing.Container("reductstore", can_connect=True)
+
+    state_in = State(containers={container})
+    with ctx(ctx.on.start(), state_in) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        charm = mgr.charm
+
+        assert charm.external_api_url == ""
+        assert charm.external_ui_url == ""
+
+    ingress_rel = Relation(
+        "ingress",
+        remote_app_name="traefik",
+        remote_app_data={"ingress": json.dumps({"url": "https://myapp.example.com"})},
+    )
+    state_in = State(containers={container}, relations={ingress_rel}, leader=True)
+
+    with ctx(ctx.on.relation_changed(ingress_rel), state_in) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        state_out = mgr.run()
+        charm = mgr.charm
+
+        model_name = state_out.model.name
+        app_name = charm.app.name
+        expected_api_base = f"/{model_name}-{app_name}"
+
+        assert charm.external_api_url == f"https://myapp.example.com{expected_api_base}"
+        assert (
+            charm.external_ui_url == f"https://myapp.example.com{expected_api_base}/ui/dashboard"
+        )
+
+
+def test_ingress_url_persistence_across_events(monkeypatch, tmp_path):
+    """Test that ingress_url persists across different charm events within same context."""
+    ctx = testing.Context(ReductstoreCharm)
+    container = testing.Container("reductstore", can_connect=True)
+
+    ingress_rel = Relation(
+        "ingress",
+        remote_app_name="traefik",
+        remote_app_data={"ingress": json.dumps({"url": "https://persistent.test"})},
+    )
+
+    state = State(
+        containers={container}, relations={ingress_rel}, config={"log-level": "debug"}, leader=True
+    )
+
+    with ctx(ctx.on.relation_changed(ingress_rel), state) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        mgr.run()
+        charm = mgr.charm
+        assert charm._stored.ingress_url == "https://persistent.test/"
+
+        assert "https://persistent.test" in charm.external_api_url
+        assert "https://persistent.test" in charm.external_ui_url
+
+
+def test_ingress_url_with_different_state_contexts(monkeypatch, tmp_path):
+    """Test that shows how ingress_url behaves across different charm contexts."""
+    ctx = testing.Context(ReductstoreCharm)
+    container = testing.Container("reductstore", can_connect=True)
+
+    ingress_rel = Relation(
+        "ingress",
+        remote_app_name="traefik",
+        remote_app_data={"ingress": json.dumps({"url": "https://context.test"})},
+    )
+    state = State(containers={container}, relations={ingress_rel}, leader=True)
+
+    with ctx(ctx.on.relation_changed(ingress_rel), state) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        state_out = mgr.run()
+        charm = mgr.charm
+        assert charm._stored.ingress_url == "https://context.test/"
+
+        final_state = state_out
+
+    with ctx(ctx.on.config_changed(), final_state) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        mgr.run()
+        charm = mgr.charm
+
+        assert charm.external_api_url != ""
+        assert charm.external_ui_url != ""
+
+
+def test_ingress_url_with_custom_api_base_path(monkeypatch, tmp_path):
+    """Test ingress_url handling with custom api-base-path configuration."""
+    ctx = testing.Context(ReductstoreCharm)
+    container = testing.Container("reductstore", can_connect=True)
+
+    custom_config: dict[str, str | int | float | bool] = {"api-base-path": "/custom/api/path"}
+    ingress_rel = Relation(
+        "ingress",
+        remote_app_name="traefik",
+        remote_app_data={"ingress": json.dumps({"url": "https://custom.example.com"})},
+    )
+    state_in = State(
+        containers={container}, relations={ingress_rel}, config=custom_config, leader=True
+    )
+
+    with ctx(ctx.on.relation_changed(ingress_rel), state_in) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        mgr.run()
+        charm = mgr.charm
+
+        assert charm._stored.ingress_url == "https://custom.example.com/"
+        assert charm.external_api_url == "https://custom.example.com/custom/api/path"
+        assert charm.external_ui_url == "https://custom.example.com/custom/api/path/ui/dashboard"
+
+
+def test_upgrade_charm_restores_ingress_url(monkeypatch, tmp_path):
+    """Test that charm upgrade restores ingress URL from relation data."""
+    seen = []
+
+    def fake_update(self, item):
+        seen.append(item)
+
+    monkeypatch.setattr(CatalogueConsumer, "update_item", fake_update, raising=True)
+
+    ctx = testing.Context(ReductstoreCharm)
+    container = testing.Container("reductstore", can_connect=True)
+
+    # Set up an ingress relation with URL data
+    ingress_rel = Relation(
+        "ingress",
+        remote_app_name="traefik",
+        remote_app_data={"ingress": json.dumps({"url": "https://upgrade.example.com"})},
+    )
+    state_in = State(containers={container}, relations={ingress_rel}, leader=True)
+
+    with ctx(ctx.on.upgrade_charm(), state_in) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        state_out = mgr.run()
+        charm = mgr.charm
+
+        # Verify that the ingress URL was restored from relation data
+        assert charm._stored.ingress_url == "https://upgrade.example.com"
+        assert isinstance(state_out.unit_status, testing.ActiveStatus)
+
+        # Verify catalogue was updated with the restored URL
+        assert len(seen) >= 1
+        model_name = state_out.model.name
+        app_name = charm.app.name
+        expected_api_base = f"/{model_name}-{app_name}"
+        expected_ui_url = f"https://upgrade.example.com{expected_api_base}/ui/dashboard"
+        assert seen[-1].url == expected_ui_url
+
+
+def test_upgrade_charm_no_ingress_relation(monkeypatch, tmp_path):
+    """Test that charm upgrade works even when no ingress relation exists."""
+    seen = []
+
+    def fake_update(self, item):
+        seen.append(item)
+
+    monkeypatch.setattr(CatalogueConsumer, "update_item", fake_update, raising=True)
+
+    ctx = testing.Context(ReductstoreCharm)
+    container = testing.Container("reductstore", can_connect=True)
+    state_in = State(containers={container}, leader=True)
+
+    with ctx(ctx.on.upgrade_charm(), state_in) as mgr:
+        _stub_license_fetch(monkeypatch, mgr.charm, tmp_path)
+        state_out = mgr.run()
+        charm = mgr.charm
+
+        # Verify that ingress URL remains empty
+        assert charm._stored.ingress_url == ""
+        assert isinstance(state_out.unit_status, testing.ActiveStatus)
+
+        # Verify catalogue was still updated (with empty URLs)
+        assert len(seen) >= 1
+        assert seen[-1].url == ""
