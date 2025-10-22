@@ -271,6 +271,7 @@ class ReductstoreCharm(ops.CharmBase):
                         "RS_LOG_LEVEL": str(log_level).upper(),
                         "RS_PORT": "8383",
                         "RS_DATA_PATH": "/data",
+                        "RS_PUBLIC_URL": self.external_api_url or "",
                         "RS_LICENSE_PATH": str(self.model.config["license-path"] or ""),
                         "RS_API_BASE_PATH": self._api_base_path(),
                     },
