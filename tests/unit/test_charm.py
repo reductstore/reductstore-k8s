@@ -33,7 +33,7 @@ def test_reductstore_pebble_ready():
                 "startup": "enabled",
                 "environment": {
                     "RS_INSTANCE_NAME": f"{model_name}-{app_name}",
-                    "RS_INSTANCE_ROLE": "primary",
+                    "RS_INSTANCE_ROLE": "PRIMARY",
                     "RS_LOG_LEVEL": "INFO",
                     "RS_PORT": "8383",
                     "RS_DATA_PATH": "/data",
@@ -70,7 +70,7 @@ def test_config_changed_valid_can_connect():
     assert updated_plan.services["reductstore"].command == "reductstore"
     assert updated_plan.services["reductstore"].environment == {
         "RS_INSTANCE_NAME": "production-reductstore",
-        "RS_INSTANCE_ROLE": "primary",
+        "RS_INSTANCE_ROLE": "PRIMARY",
         "RS_LOG_LEVEL": "DEBUG",
         "RS_PORT": "8383",
         "RS_DATA_PATH": "/data",
