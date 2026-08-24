@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright 2025 anthony
+# Copyright 2025-2026 ReductSoftware UG
 # See LICENSE file for licensing details.
 
 import logging

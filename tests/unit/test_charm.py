@@ -1,4 +1,4 @@
-# Copyright 2025 anthony
+# Copyright 2025-2026 ReductSoftware UG
 # See LICENSE file for licensing details.
 #
 # Learn more about testing at: https://juju.is/docs/sdk/testing

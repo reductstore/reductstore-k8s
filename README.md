@@ -3,7 +3,7 @@
 Charmhub package name: **reductstore-k8s**  
 More information: https://charmhub.io/reductstore-k8s
 
-This charm deploys **ReductStore**, a time-series object store for high-frequency unstructured data, on Kubernetes with Pebble, persistent storage, and optional ingress/COS catalogue integration.
+This charm deploys **ReductStore**, a time-indexed object store for high-frequency unstructured data, on Kubernetes with Pebble, persistent storage, and optional ingress/COS catalogue integration.
 
 ## Other resources
 
