@@ -35,6 +35,12 @@ config:
       default: "info"
       type: string
 
+    instance-name:
+      description: |
+        Stable ReductStore instance name. Defaults to the Juju model and application names.
+      default: ""
+      type: string
+
     api-base-path:
       type: string
       default: ""

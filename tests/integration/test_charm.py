@@ -3,7 +3,6 @@
 # See LICENSE file for licensing details.
 
 import logging
-import tempfile
 from pathlib import Path
 
 import aiohttp
@@ -23,14 +22,8 @@ async def test_build_and_deploy(ops_test: OpsTest):
     # Build charm from local source
     charm = await ops_test.build_charm(".")
 
-    # Create a temporary license file
-    with tempfile.NamedTemporaryFile("wb", delete=False) as tf:
-        tf.write(b"TEST-LICENSE")
-        lic_path = tf.name
-
     resources = {
         "reductstore-image": METADATA["resources"]["reductstore-image"]["upstream-source"],
-        "reductstore-license": lic_path,
     }
 
     # Deploy, then wait for Active
