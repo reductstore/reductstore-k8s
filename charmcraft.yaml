@@ -3,7 +3,7 @@
 type: charm
 name: reductstore-k8s
 title: ReductStore Charm
-summary: ReductStore is a time series object store for high-frequency unstructured data.
+summary: High-performance, time-indexed object storage for robotics and industrial IoT
 description: |
   This charm deploys ReductStore inside Kubernetes, with persistent storage and ingress support.
 links:
@@ -35,11 +35,10 @@ config:
       default: "info"
       type: string
 
-    license-path:
+    instance-name:
       description: |
-        Path inside the container where the ReductStore license file is expected.
-        Default is /reduct.lic
-      default: "/reduct.lic"
+        Stable ReductStore instance name. Defaults to the Juju model and application names.
+      default: ""
       type: string
 
     api-base-path:
@@ -63,11 +62,6 @@ resources:
     type: oci-image
     description: ReductStore container image
     upstream-source: reduct/store:latest
-
-  reductstore-license:
-    type: file
-    filename: reduct.lic
-    description: ReductStore license file
 
 storage:
   data:
