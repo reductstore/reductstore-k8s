@@ -37,22 +37,22 @@ jobs:
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
-      - name: Set up strictly confined MicroK8s
+      - name: Set up classic MicroK8s
         run: |
-          sudo snap install microk8s --channel=1.32-strict --devmode
-          sudo microk8s status --wait-ready --timeout=600
-          sudo microk8s enable hostpath-storage
-          sudo microk8s enable dns
-          sudo microk8s enable rbac
-          sudo microk8s kubectl -n kube-system rollout status deployment/coredns --timeout=600s
-          sudo microk8s kubectl -n kube-system rollout status deployment/hostpath-provisioner --timeout=600s
+          sudo snap install microk8s --classic --channel=1.32/stable
+          sudo usermod -a -G microk8s "$USER"
+          sudo -g microk8s microk8s status --wait-ready --timeout=600
+          sudo -g microk8s microk8s enable hostpath-storage
+          sudo -g microk8s microk8s enable dns
+          sudo -g microk8s microk8s enable rbac
+          sudo -g microk8s microk8s kubectl -n kube-system rollout status deployment/coredns --timeout=600s
+          sudo -g microk8s microk8s kubectl -n kube-system rollout status deployment/hostpath-provisioner --timeout=600s
       - name: Set up Juju and Charmcraft
         run: |
-          sudo snap install juju --channel=3.6/stable
+          sudo snap install juju --channel=3.5/stable
           sudo snap install charmcraft --channel=latest/stable --classic
           pipx install tox==4.23.2
-          sudo usermod -a -G snap_microk8s "$USER"
-          sg snap_microk8s -c 'juju bootstrap microk8s controller && juju add-model testing'
+          sg microk8s -c 'juju bootstrap microk8s controller && juju add-model testing'
       - name: Apply compatibility image override
         if: inputs.workload-image != ''
         env:
