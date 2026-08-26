@@ -39,11 +39,13 @@ jobs:
           python-version: '3.12'
       - name: Set up strictly confined MicroK8s
         run: |
-          sudo snap install microk8s --channel=1.32-strict
+          sudo snap install microk8s --channel=1.32-strict --devmode
           sudo microk8s status --wait-ready --timeout=600
           sudo microk8s enable hostpath-storage
           sudo microk8s enable dns
           sudo microk8s enable rbac
+          sudo microk8s kubectl -n kube-system rollout status deployment/coredns --timeout=600s
+          sudo microk8s kubectl -n kube-system rollout status deployment/hostpath-provisioner --timeout=600s
       - name: Set up Juju and Charmcraft
         run: |
           sudo snap install juju --channel=3.6/stable
