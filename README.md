@@ -65,55 +65,37 @@ Refreshing preserves the application's configuration, relations, and persistent 
 
 ## Publishing
 
-Publish from a tested, clean `main` branch. The Charmhub package is already registered, so maintainers only need to authenticate:
+Stable releases are published by GitHub Actions from strict final SemVer tags (`vX.Y.Z`) that point to a commit already merged into `main`. The release workflow runs workflow linting, Python linting, static typing, unit tests, MicroK8s integration tests, and native amd64/arm64 builds before requesting approval for the protected `stable` environment. It then publishes both architectures and their matching OCI resource revisions to `latest/stable`.
+
+To release a merged commit:
+
+```shell
+git tag -a v1.2.3 -m "Release charm v1.2.3"
+git push origin v1.2.3
+```
+
+To republish an existing release tag, use **Actions > Publish stable release > Run workflow** and enter the exact tag. This is intentionally limited to existing strict SemVer tags reachable from `main`; it cannot publish arbitrary commits or images.
+
+### Repository setup
+
+Before enabling publication, a repository administrator must create the `stable` GitHub environment and configure a required reviewer. Create a package-scoped Charmhub token with `package-manage` permission limited to the `reductstore-k8s` package and `latest/stable` channel. Store it only as the `CHARMHUB_TOKEN` environment secret on `stable`, then rotate it before it expires. No other Actions secret is used for publication.
+
+The release workflow derives the workload image from the tagged `charmcraft.yaml` and rejects floating `latest` images. The existing `v1.0.0` tag is the sole compatibility exception: its source metadata is asserted to contain `reduct/store:latest`, but the runner temporarily uses `reduct/store:v1.20.11` for testing and publication. Future releases must pin their reviewed image in `charmcraft.yaml`.
+
+### Recovery Commands
+
+Use these commands only to inspect or recover a known Charmhub revision; normal publishing is performed by the release workflow:
 
 ```shell
 charmcraft login
-charmcraft whoami
-```
-
-The OCI image is a separate Charmhub resource. Pull the intended ReductStore version and upload its local Docker image ID:
-
-```shell
-docker pull reduct/store:v1.20.11
-IMAGE_ID=$(docker image inspect --format='{{.Id}}' reduct/store:v1.20.11)
-charmcraft upload-resource reductstore-k8s reductstore-image --image="${IMAGE_ID}"
-```
-
-Record the resource revision printed by `upload-resource`. Then pack and upload the charm to the edge channel, attaching that resource revision:
-
-```shell
-charmcraft pack --platform amd64
-charmcraft upload reductstore-k8s_amd64.charm \
-  --release=latest/edge \
-  --resource=reductstore-image:<RESOURCE_REVISION>
-```
-
-The upload command prints a separate charm revision. Confirm the channel map and test the release:
-
-```shell
 charmcraft status reductstore-k8s
-juju refresh reductstore-k8s --channel latest/edge
-juju status reductstore-k8s --watch 2s
-```
-
-After validation, release the same charm and resource revisions to the stable channel:
-
-```shell
 charmcraft release reductstore-k8s \
   --revision=<CHARM_REVISION> \
   --channel=latest/stable \
   --resource=reductstore-image:<RESOURCE_REVISION>
 ```
 
-Charm and resource revisions use independent numbering. For multi-architecture releases, build and upload each charm platform with an OCI resource revision for the matching architecture.
-
-Use a Git tag for the source release version; a separate Charmhub track is only needed when maintaining multiple incompatible release lines:
-
-```shell
-git tag -a v1.0.0 -m "Release charm v1.0.0"
-git push origin v1.0.0
-```
+Charm and resource revisions are independent. A rerun can safely recover a partial two-architecture release because Charmhub deduplicates matching uploads; confirm the final channel map with `charmcraft status reductstore-k8s`.
 
 ## Other resources
 

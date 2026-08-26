@@ -61,7 +61,7 @@ resources:
   reductstore-image:
     type: oci-image
     description: ReductStore container image
-    upstream-source: reduct/store:latest
+    upstream-source: reduct/store:v1.20.11
 
 storage:
   data:
