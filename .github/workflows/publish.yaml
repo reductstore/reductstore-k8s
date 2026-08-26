@@ -1,0 +1,137 @@
+name: Publish stable release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: Existing vX.Y.Z tag to publish.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      release-tag: ${{ steps.release.outputs.release-tag }}
+      workload-image: ${{ steps.release.outputs.workload-image }}
+      compatibility-override: ${{ steps.release.outputs.compatibility-override }}
+    steps:
+      - name: Check out main history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve and validate release
+        id: release
+        env:
+          EVENT_TAG: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.release-tag }}
+        run: |
+          release_tag=${INPUT_TAG:-$EVENT_TAG}
+          if ! [[ "$release_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tag must be strict vX.Y.Z" >&2
+            exit 1
+          fi
+          git fetch --force origin "refs/tags/$release_tag:refs/tags/$release_tag"
+          git merge-base --is-ancestor "$release_tag" origin/main
+          workload_image=$(git show "$release_tag:charmcraft.yaml" | grep '^    upstream-source: ' | cut -d' ' -f3-)
+          compatibility_override=false
+          if [[ "$release_tag" == v1.0.0 && "$workload_image" == reduct/store:latest ]]; then
+            workload_image=reduct/store:v1.20.11
+            compatibility_override=true
+          elif [[ "$workload_image" == *:latest ]]; then
+            echo "Stable releases cannot use a floating latest image" >&2
+            exit 1
+          fi
+          printf 'release-tag=%s\nworkload-image=%s\ncompatibility-override=%s\n' "$release_tag" "$workload_image" "$compatibility_override" >> "$GITHUB_OUTPUT"
+          printf "## Release inputs\n\n- Tag: \`%s\`\n- Workload image: \`%s\`\n- Compatibility override: \`%s\`\n" "$release_tag" "$workload_image" "$compatibility_override" >> "$GITHUB_STEP_SUMMARY"
+
+  checks:
+    needs: prepare
+    uses: ./.github/workflows/checks.yaml
+    with:
+      checkout-ref: ${{ needs.prepare.outputs.release-tag }}
+
+  integration:
+    needs: prepare
+    uses: ./.github/workflows/integration.yaml
+    with:
+      checkout-ref: ${{ needs.prepare.outputs.release-tag }}
+      workload-image: ${{ needs.prepare.outputs.compatibility-override == 'true' && needs.prepare.outputs.workload-image || '' }}
+
+  build:
+    needs: [prepare, checks, integration]
+    strategy:
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.prepare.outputs.release-tag }}
+          persist-credentials: false
+      - name: Set up LXD
+        run: |
+          sudo snap install lxd --channel latest/stable
+          sudo lxd waitready
+          sudo lxd init --auto
+      - name: Install Charmcraft
+        run: sudo snap install charmcraft --channel latest/stable --classic
+      - name: Apply v1.0.0 compatibility override
+        if: needs.prepare.outputs.compatibility-override == 'true'
+        env:
+          WORKLOAD_IMAGE: ${{ needs.prepare.outputs.workload-image }}
+        run: perl -0pi -e "s|reduct/store:latest|$ENV{WORKLOAD_IMAGE}|" charmcraft.yaml
+      - name: Build charm
+        run: charmcraft pack --platform=${{ matrix.architecture }}
+      - name: Upload charm artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: reductstore-charm-${{ matrix.architecture }}
+          path: '*_${{ matrix.architecture }}.charm'
+          if-no-files-found: error
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    environment: stable
+    timeout-minutes: 30
+    steps:
+      - name: Download charm artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: reductstore-charm-*
+          path: artifacts
+          merge-multiple: true
+      - name: Install Charmcraft
+        run: sudo snap install charmcraft --channel latest/stable --classic
+      - name: Publish both architectures
+        env:
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
+          WORKLOAD_IMAGE: ${{ needs.prepare.outputs.workload-image }}
+        run: |
+          shopt -s nullglob
+          for architecture in amd64 arm64; do
+            docker pull --platform="linux/$architecture" "$WORKLOAD_IMAGE"
+            image_id=$(docker image inspect --format='{{.Id}}' "$WORKLOAD_IMAGE")
+            resource_output=$(charmcraft upload-resource reductstore-k8s reductstore-image --image="$image_id" --architecture="$architecture" --format json)
+            resource_revision=$(printf '%s' "$resource_output" | jq -r '.revision')
+            charm_files=(artifacts/*_"$architecture".charm)
+            test "${#charm_files[@]}" -eq 1
+            charm_output=$(charmcraft upload "${charm_files[0]}" --format json)
+            charm_revision=$(printf '%s' "$charm_output" | jq -r '.revision')
+            charmcraft release reductstore-k8s --revision="$charm_revision" --channel=latest/stable --resource="reductstore-image:$resource_revision"
+            printf -- "- %s: charm \`%s\`, resource \`%s\`\n" "$architecture" "$charm_revision" "$resource_revision" >> "$GITHUB_STEP_SUMMARY"
+          done

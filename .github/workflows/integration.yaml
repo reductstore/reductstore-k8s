@@ -1,0 +1,81 @@
+name: Integration
+
+on:
+  pull_request:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        description: Git reference to test.
+        required: true
+        type: string
+      workload-image:
+        description: Optional runner-only ReductStore image override.
+        required: false
+        type: string
+
+concurrency:
+  group: integration-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.checkout-ref || github.sha }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Set up classic MicroK8s
+        run: |
+          sudo snap install microk8s --classic --channel=1.32/stable
+          sudo usermod -a -G microk8s "$USER"
+          sudo -g microk8s microk8s status --wait-ready --timeout=600
+          sudo -g microk8s microk8s enable hostpath-storage
+          sudo -g microk8s microk8s enable dns
+          sudo -g microk8s microk8s enable rbac
+          sudo -g microk8s microk8s kubectl -n kube-system rollout status deployment/coredns --timeout=600s
+          sudo -g microk8s microk8s kubectl -n kube-system rollout status deployment/hostpath-provisioner --timeout=600s
+      - name: Set up Juju and Charmcraft
+        run: |
+          sudo snap install juju --channel=3.6/stable
+          sudo snap install charmcraft --channel=latest/stable --classic
+          pipx install tox==4.23.2
+          sg microk8s -c 'microk8s config | juju add-k8s --client local-k8s'
+          sg microk8s -c 'juju bootstrap local-k8s controller && juju add-model testing'
+      - name: Apply compatibility image override
+        if: inputs.workload-image != ''
+        env:
+          WORKLOAD_IMAGE: ${{ inputs.workload-image }}
+        run: |
+          test "$WORKLOAD_IMAGE" = 'reduct/store:v1.20.11'
+          grep -Fqx '    upstream-source: reduct/store:latest' charmcraft.yaml
+          perl -0pi -e "s|reduct/store:latest|$ENV{WORKLOAD_IMAGE}|" charmcraft.yaml
+      - name: Run integration tests
+        run: tox run -e integration -- --model testing --destructive-mode
+      - name: Collect failure diagnostics
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          juju status --model testing --format yaml > diagnostics/juju-status.yaml || true
+          juju debug-log --model testing --replay > diagnostics/juju-debug.log || true
+          sudo microk8s kubectl get pods --all-namespaces -o wide | tee diagnostics/pods.txt > /dev/null || true
+          sudo microk8s kubectl describe pods --all-namespaces | tee diagnostics/pod-describe.txt > /dev/null || true
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: integration-diagnostics
+          path: diagnostics
+          if-no-files-found: error
