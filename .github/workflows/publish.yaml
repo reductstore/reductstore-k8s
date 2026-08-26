@@ -40,7 +40,7 @@ jobs:
           fi
           git fetch --force origin "refs/tags/$release_tag:refs/tags/$release_tag"
           git merge-base --is-ancestor "$release_tag" origin/main
-          workload_image=$(git show "$release_tag:charmcraft.yaml" | grep '^    upstream-source: ' | cut -d' ' -f3-)
+          workload_image=$(git show "$release_tag:charmcraft.yaml" | sed -n 's/^[[:space:]]*upstream-source:[[:space:]]*//p')
           compatibility_override=false
           if [[ "$release_tag" == v1.0.0 && "$workload_image" == reduct/store:latest ]]; then
             workload_image=reduct/store:v1.20.11
@@ -71,9 +71,9 @@ jobs:
       matrix:
         include:
           - architecture: amd64
-            runner: ubuntu-24.04
+            runner: ubuntu-22.04
           - architecture: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-22.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
@@ -87,6 +87,7 @@ jobs:
           sudo snap install lxd --channel latest/stable
           sudo lxd waitready
           sudo lxd init --auto
+          sudo usermod -a -G lxd "$USER"
       - name: Install Charmcraft
         run: sudo snap install charmcraft --channel latest/stable --classic
       - name: Apply v1.0.0 compatibility override
@@ -95,7 +96,7 @@ jobs:
           WORKLOAD_IMAGE: ${{ needs.prepare.outputs.workload-image }}
         run: perl -0pi -e "s|reduct/store:latest|$ENV{WORKLOAD_IMAGE}|" charmcraft.yaml
       - name: Build charm
-        run: charmcraft pack --platform=${{ matrix.architecture }}
+        run: sg lxd -c 'charmcraft pack --platform=${{ matrix.architecture }}'
       - name: Upload charm artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
