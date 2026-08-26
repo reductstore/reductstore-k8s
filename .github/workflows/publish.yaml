@@ -121,7 +121,7 @@ jobs:
           for architecture in amd64 arm64; do
             docker pull --platform="linux/$architecture" "$WORKLOAD_IMAGE"
             image_id=$(docker image inspect --format='{{.Id}}' "$WORKLOAD_IMAGE")
-            resource_output=$(charmcraft upload-resource reductstore-k8s reductstore-image --image="$image_id" --architecture="$architecture" --format json)
+            resource_output=$(charmcraft upload-resource reductstore-k8s reductstore-image --image="$image_id" --arch="$architecture" --format json)
             resource_revision=$(printf '%s' "$resource_output" | jq -r '.revision')
             charm_files=(artifacts/*_"$architecture".charm)
             test "${#charm_files[@]}" -eq 1
