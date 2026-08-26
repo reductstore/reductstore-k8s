@@ -34,7 +34,7 @@ jobs:
           ref: ${{ inputs.checkout-ref || github.sha }}
           persist-credentials: false
       - name: Set up operator environment
-        uses: charmed-kubernetes/actions-operator@3d3eb35d73c0f326d07880d83a99876d321f823c # 1.1.0
+        uses: charmed-kubernetes/actions-operator@d8217ad61c15f746727a9d41563c13e9b9fe56e3 # main, pinned 2026-08-26
         with:
           provider: microk8s
           channel: 1.32/stable
