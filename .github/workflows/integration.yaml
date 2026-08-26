@@ -33,20 +33,23 @@ jobs:
         with:
           ref: ${{ inputs.checkout-ref || github.sha }}
           persist-credentials: false
-      - name: Set up operator environment
-        uses: charmed-kubernetes/actions-operator@d8217ad61c15f746727a9d41563c13e9b9fe56e3 # main, pinned 2026-08-26
-        with:
-          provider: microk8s
-          channel: 1.32/stable
-          juju-channel: 3.6/stable
-          charmcraft-channel: latest/stable
-          tox-version: 4.23.2
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
-      - name: Install tox
-        run: python -m pip install --disable-pip-version-check tox
+      - name: Set up Juju and Charmcraft
+        run: |
+          sudo snap install juju --channel=3.6/stable
+          sudo snap install charmcraft --channel=latest/stable --classic
+          pipx install tox==4.23.2
+      - name: Set up strictly confined MicroK8s
+        run: |
+          sudo snap install microk8s --channel=1.32-strict
+          sudo snap connect juju:microk8s microk8s:microk8s
+          sudo microk8s status --wait-ready --timeout=600
+          sudo microk8s enable hostpath-storage dns rbac
+          juju bootstrap microk8s controller
+          juju add-model testing
       - name: Apply compatibility image override
         if: inputs.workload-image != ''
         env:
@@ -63,8 +66,8 @@ jobs:
           mkdir -p diagnostics
           juju status --model testing --format yaml > diagnostics/juju-status.yaml || true
           juju debug-log --model testing --replay > diagnostics/juju-debug.log || true
-          microk8s kubectl get pods --all-namespaces -o wide > diagnostics/pods.txt || true
-          microk8s kubectl describe pods --all-namespaces > diagnostics/pod-describe.txt || true
+          sudo microk8s kubectl get pods --all-namespaces -o wide > diagnostics/pods.txt || true
+          sudo microk8s kubectl describe pods --all-namespaces > diagnostics/pod-describe.txt || true
       - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
