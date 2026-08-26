@@ -82,12 +82,6 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.release-tag }}
           persist-credentials: false
-      - name: Set up LXD
-        run: |
-          sudo snap install lxd --channel latest/stable
-          sudo lxd waitready
-          sudo lxd init --auto
-          sudo usermod -a -G lxd "$USER"
       - name: Install Charmcraft
         run: sudo snap install charmcraft --channel latest/stable --classic
       - name: Apply v1.0.0 compatibility override
@@ -96,7 +90,7 @@ jobs:
           WORKLOAD_IMAGE: ${{ needs.prepare.outputs.workload-image }}
         run: perl -0pi -e "s|reduct/store:latest|$ENV{WORKLOAD_IMAGE}|" charmcraft.yaml
       - name: Build charm
-        run: sg lxd -c 'charmcraft pack --platform=${{ matrix.architecture }}'
+        run: charmcraft pack --destructive-mode --platform=${{ matrix.architecture }}
       - name: Upload charm artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
