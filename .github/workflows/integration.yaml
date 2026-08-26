@@ -49,10 +49,11 @@ jobs:
           sudo -g microk8s microk8s kubectl -n kube-system rollout status deployment/hostpath-provisioner --timeout=600s
       - name: Set up Juju and Charmcraft
         run: |
-          sudo snap install juju --revision=28096
+          sudo snap install juju --channel=3.6/stable
           sudo snap install charmcraft --channel=latest/stable --classic
           pipx install tox==4.23.2
-          sg microk8s -c 'juju bootstrap microk8s controller && juju add-model testing'
+          sg microk8s -c 'microk8s config | juju add-k8s local-k8s'
+          sg microk8s -c 'juju bootstrap local-k8s controller && juju add-model testing'
       - name: Apply compatibility image override
         if: inputs.workload-image != ''
         env:
