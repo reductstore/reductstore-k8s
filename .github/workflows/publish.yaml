@@ -50,7 +50,7 @@ jobs:
             exit 1
           fi
           printf 'release-tag=%s\nworkload-image=%s\ncompatibility-override=%s\n' "$release_tag" "$workload_image" "$compatibility_override" >> "$GITHUB_OUTPUT"
-          printf '## Release inputs\n\n- Tag: `%s`\n- Workload image: `%s`\n- Compatibility override: `%s`\n' "$release_tag" "$workload_image" "$compatibility_override" >> "$GITHUB_STEP_SUMMARY"
+          printf "## Release inputs\n\n- Tag: \`%s\`\n- Workload image: \`%s\`\n- Compatibility override: \`%s\`\n" "$release_tag" "$workload_image" "$compatibility_override" >> "$GITHUB_STEP_SUMMARY"
 
   checks:
     needs: prepare
@@ -122,14 +122,16 @@ jobs:
           CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
           WORKLOAD_IMAGE: ${{ needs.prepare.outputs.workload-image }}
         run: |
+          shopt -s nullglob
           for architecture in amd64 arm64; do
             docker pull --platform="linux/$architecture" "$WORKLOAD_IMAGE"
             image_id=$(docker image inspect --format='{{.Id}}' "$WORKLOAD_IMAGE")
             resource_output=$(charmcraft upload-resource reductstore-k8s reductstore-image --image="$image_id" --architecture="$architecture" --format json)
             resource_revision=$(printf '%s' "$resource_output" | jq -r '.revision')
-            charm_file=$(printf 'artifacts/*_%s.charm' "$architecture")
-            charm_output=$(charmcraft upload $charm_file --format json)
+            charm_files=(artifacts/*_"$architecture".charm)
+            test "${#charm_files[@]}" -eq 1
+            charm_output=$(charmcraft upload "${charm_files[0]}" --format json)
             charm_revision=$(printf '%s' "$charm_output" | jq -r '.revision')
             charmcraft release reductstore-k8s --revision="$charm_revision" --channel=latest/stable --resource="reductstore-image:$resource_revision"
-            printf -- '- %s: charm `%s`, resource `%s`\n' "$architecture" "$charm_revision" "$resource_revision" >> "$GITHUB_STEP_SUMMARY"
+            printf -- "- %s: charm \`%s\`, resource \`%s\`\n" "$architecture" "$charm_revision" "$resource_revision" >> "$GITHUB_STEP_SUMMARY"
           done
