@@ -49,9 +49,6 @@ jobs:
           sudo -g microk8s microk8s kubectl -n kube-system rollout status deployment/hostpath-provisioner --timeout=600s
       - name: Set up Juju and Charmcraft
         run: |
-          sudo snap install lxd --channel=latest/stable
-          sudo lxd init --auto
-          sudo usermod -a -G lxd "$USER"
           sudo snap install juju --channel=3.6/stable
           sudo snap install charmcraft --channel=latest/stable --classic
           pipx install tox==4.23.2
@@ -66,7 +63,7 @@ jobs:
           grep -Fqx '    upstream-source: reduct/store:latest' charmcraft.yaml
           perl -0pi -e "s|reduct/store:latest|$ENV{WORKLOAD_IMAGE}|" charmcraft.yaml
       - name: Run integration tests
-        run: sg lxd -c 'tox run -e integration -- --model testing'
+        run: tox run -e integration -- --model testing --destructive-mode
       - name: Collect failure diagnostics
         if: failure()
         run: |
