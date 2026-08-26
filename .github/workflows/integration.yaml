@@ -49,8 +49,8 @@ jobs:
           sudo snap install juju --channel=3.6/stable
           sudo snap install charmcraft --channel=latest/stable --classic
           pipx install tox==4.23.2
-          juju bootstrap microk8s controller
-          juju add-model testing
+          sudo usermod -a -G snap_microk8s "$USER"
+          sg snap_microk8s -c 'juju bootstrap microk8s controller && juju add-model testing'
       - name: Apply compatibility image override
         if: inputs.workload-image != ''
         env:
