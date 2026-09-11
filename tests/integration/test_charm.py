@@ -72,12 +72,13 @@ async def test_integrate_with_ingress_and_catalogue(reductstore_deployed: OpsTes
         "traefik-k8s",
         application_name=TRAEFIK_APP_NAME,
         channel="latest/stable",
+        base="ubuntu@20.04",
         trust=True,
     )
     await ops_test.model.deploy(
         "catalogue-k8s",
         application_name=CATALOGUE_APP_NAME,
-        channel="3.0/stable",
+        channel="1/stable",
     )
     await ops_test.model.integrate(f"{APP_NAME}:ingress", f"{TRAEFIK_APP_NAME}:ingress")
     await ops_test.model.integrate(f"{APP_NAME}:catalogue", f"{CATALOGUE_APP_NAME}:catalogue")
