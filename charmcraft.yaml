@@ -22,10 +22,8 @@ platforms:
 
 parts:
   charm:
-    plugin: uv
+    plugin: charm
     source: .
-    build-snaps:
-      - astral-uv
 
 # Configuration options
 config:
