@@ -143,6 +143,12 @@ def test_catalogue_updated_on_ingress_ready(monkeypatch):
         charm = mgr.charm
         assert charm._stored.ingress_url == "http://example.test/"
         assert isinstance(out.unit_status, testing.ActiveStatus)
+        assert (
+            out.get_container(container.name)
+            .plan.services["reductstore"]
+            .environment["RS_PUBLIC_URL"]
+            == f"http://example.test/{out.model.name}-{charm.app.name}"
+        )
 
     assert len(seen) >= 1
     assert seen[-1].url == f"http://example.test/{out.model.name}-{charm.app.name}/ui/dashboard"
@@ -178,7 +184,7 @@ def test_catalogue_cleared_on_ingress_revoked(monkeypatch):
         out = mgr.run()
         charm = mgr.charm
         assert charm._stored.ingress_url == ""
-        assert isinstance(out.unit_status, testing.MaintenanceStatus)
+        assert isinstance(out.unit_status, testing.ActiveStatus)
 
     assert len(seen) >= 2
     assert seen[-1].url == ""
@@ -247,8 +253,7 @@ def test_ingress_url_cleared_on_revoke():
         charm = mgr.charm
 
         assert charm._stored.ingress_url == ""
-        assert isinstance(state_out.unit_status, testing.MaintenanceStatus)
-        assert "Waiting for ingress" in state_out.unit_status.message
+        assert isinstance(state_out.unit_status, testing.ActiveStatus)
 
 
 def test_external_urls_depend_on_ingress_url():

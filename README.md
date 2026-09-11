@@ -94,7 +94,7 @@ Refreshing preserves the application's configuration, relations, and persistent 
 - This is a Kubernetes charm. It does not support machine models.
 - The charm defines one filesystem storage volume mounted at `/data`, with a minimum size of 10GiB. Select the storage class and requested size using Juju storage configuration for the target Kubernetes cluster.
 - The ReductStore image is pinned in `charmcraft.yaml`. Use the upstream [ReductStore documentation](https://www.reduct.store/docs) for application-specific configuration and API behavior not exposed by the charm.
-- After a new ingress URL is issued, the charm records it immediately for the Catalogue relation. On current revisions, change a valid charm configuration option, such as `log-level`, once to re-render the Pebble plan and pass the URL to ReductStore as `RS_PUBLIC_URL`.
+- When an ingress URL is issued or revoked, the charm replans the workload so ReductStore receives the current `RS_PUBLIC_URL` without requiring a configuration change.
 
 ## Publishing
 
