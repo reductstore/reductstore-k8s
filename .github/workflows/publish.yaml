@@ -1,7 +1,8 @@
-name: Publish stable release
+name: Publish release
 
 on:
   push:
+    branches: [main]
     tags: ['v*.*.*']
   workflow_dispatch:
     inputs:
@@ -13,12 +14,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   prepare:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
-      release-tag: ${{ steps.release.outputs.release-tag }}
+      checkout-ref: ${{ steps.release.outputs.checkout-ref }}
+      release-channel: ${{ steps.release.outputs.release-channel }}
+      release-environment: ${{ steps.release.outputs.release-environment }}
       workload-image: ${{ steps.release.outputs.workload-image }}
       compatibility-override: ${{ steps.release.outputs.compatibility-override }}
     steps:
@@ -27,42 +34,53 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Resolve and validate release
+      - name: Resolve and validate release source
         id: release
         env:
+          EVENT_REF_TYPE: ${{ github.ref_type }}
           EVENT_TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
           INPUT_TAG: ${{ inputs.release-tag }}
         run: |
-          release_tag=${INPUT_TAG:-$EVENT_TAG}
-          if ! [[ "$release_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Release tag must be strict vX.Y.Z" >&2
-            exit 1
-          fi
-          git fetch --force origin "refs/tags/$release_tag:refs/tags/$release_tag"
-          git merge-base --is-ancestor "$release_tag" origin/main
-          workload_image=$(git show "$release_tag:charmcraft.yaml" | sed -n 's/^[[:space:]]*upstream-source:[[:space:]]*//p')
           compatibility_override=false
-          if [[ "$release_tag" == v1.0.0 && "$workload_image" == reduct/store:latest ]]; then
+          if [[ -n "$INPUT_TAG" || "$EVENT_REF_TYPE" == tag ]]; then
+            checkout_ref=${INPUT_TAG:-$EVENT_TAG}
+            if ! [[ "$checkout_ref" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Release tag must be strict vX.Y.Z" >&2
+              exit 1
+            fi
+            git fetch --force origin "refs/tags/$checkout_ref:refs/tags/$checkout_ref"
+            git merge-base --is-ancestor "$checkout_ref" origin/main
+            release_channel=latest/stable
+            release_environment=stable
+          else
+            checkout_ref=$SOURCE_SHA
+            release_channel=latest/edge
+            release_environment=edge
+          fi
+          workload_image=$(git show "$checkout_ref:charmcraft.yaml" | sed -n 's/^[[:space:]]*upstream-source:[[:space:]]*//p')
+          test -n "$workload_image"
+          if [[ "$checkout_ref" == v1.0.0 && "$workload_image" == reduct/store:latest ]]; then
             workload_image=reduct/store:v1.20.11
             compatibility_override=true
-          elif [[ "$workload_image" == *:latest ]]; then
+          elif [[ "$release_channel" == latest/stable && "$workload_image" == *:latest ]]; then
             echo "Stable releases cannot use a floating latest image" >&2
             exit 1
           fi
-          printf 'release-tag=%s\nworkload-image=%s\ncompatibility-override=%s\n' "$release_tag" "$workload_image" "$compatibility_override" >> "$GITHUB_OUTPUT"
-          printf "## Release inputs\n\n- Tag: \`%s\`\n- Workload image: \`%s\`\n- Compatibility override: \`%s\`\n" "$release_tag" "$workload_image" "$compatibility_override" >> "$GITHUB_STEP_SUMMARY"
+          printf 'checkout-ref=%s\nrelease-channel=%s\nrelease-environment=%s\nworkload-image=%s\ncompatibility-override=%s\n' "$checkout_ref" "$release_channel" "$release_environment" "$workload_image" "$compatibility_override" >> "$GITHUB_OUTPUT"
+          printf "## Release inputs\n\n- Source: \`%s\`\n- Channel: \`%s\`\n- Workload image: \`%s\`\n- Compatibility override: \`%s\`\n" "$checkout_ref" "$release_channel" "$workload_image" "$compatibility_override" >> "$GITHUB_STEP_SUMMARY"
 
   checks:
     needs: prepare
     uses: ./.github/workflows/checks.yaml
     with:
-      checkout-ref: ${{ needs.prepare.outputs.release-tag }}
+      checkout-ref: ${{ needs.prepare.outputs.checkout-ref }}
 
   integration:
     needs: prepare
     uses: ./.github/workflows/integration.yaml
     with:
-      checkout-ref: ${{ needs.prepare.outputs.release-tag }}
+      checkout-ref: ${{ needs.prepare.outputs.checkout-ref }}
       workload-image: ${{ needs.prepare.outputs.compatibility-override == 'true' && needs.prepare.outputs.workload-image || '' }}
 
   build:
@@ -80,7 +98,7 @@ jobs:
       - name: Check out release source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ needs.prepare.outputs.release-tag }}
+          ref: ${{ needs.prepare.outputs.checkout-ref }}
           persist-credentials: false
       - name: Install Charmcraft
         run: sudo snap install charmcraft --channel latest/stable --classic
@@ -101,13 +119,13 @@ jobs:
   publish:
     needs: [prepare, build]
     runs-on: ubuntu-24.04
-    environment: stable
+    environment: ${{ needs.prepare.outputs.release-environment }}
     timeout-minutes: 30
     steps:
       - name: Check out release source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ needs.prepare.outputs.release-tag }}
+          ref: ${{ needs.prepare.outputs.checkout-ref }}
           persist-credentials: false
       - name: Download charm artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -132,6 +150,6 @@ jobs:
             test "${#charm_files[@]}" -eq 1
             charm_output=$(charmcraft upload "${charm_files[0]}" --format json)
             charm_revision=$(printf '%s' "$charm_output" | jq -r '.revision')
-            charmcraft release reductstore-k8s --revision="$charm_revision" --channel=latest/stable --resource="reductstore-image:$resource_revision"
+            charmcraft release reductstore-k8s --revision="$charm_revision" --channel="${{ needs.prepare.outputs.release-channel }}" --resource="reductstore-image:$resource_revision"
             printf -- "- %s: charm \`%s\`, resource \`%s\`\n" "$architecture" "$charm_revision" "$resource_revision" >> "$GITHUB_STEP_SUMMARY"
           done
