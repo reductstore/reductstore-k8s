@@ -45,10 +45,8 @@ jobs:
           sudo -g microk8s microk8s enable hostpath-storage
           sudo -g microk8s microk8s enable dns
           sudo -g microk8s microk8s enable rbac
-          sudo -g microk8s microk8s enable metallb:10.64.140.43-10.64.140.49
           sudo -g microk8s microk8s kubectl -n kube-system rollout status deployment/coredns --timeout=600s
           sudo -g microk8s microk8s kubectl -n kube-system rollout status deployment/hostpath-provisioner --timeout=600s
-          sudo -g microk8s microk8s kubectl -n metallb-system rollout status deployment/controller --timeout=600s
       - name: Set up Juju and Charmcraft
         run: |
           sudo snap install juju --channel=3.6/stable

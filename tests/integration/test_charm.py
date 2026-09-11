@@ -73,6 +73,7 @@ async def test_integrate_with_ingress_and_catalogue(reductstore_deployed: OpsTes
         application_name=TRAEFIK_APP_NAME,
         channel="latest/stable",
         base="ubuntu@20.04",
+        config={"external_hostname": "traefik.test"},
         trust=True,
     )
     await ops_test.model.deploy(
