@@ -139,6 +139,7 @@ jobs:
         env:
           CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
           WORKLOAD_IMAGE: ${{ needs.prepare.outputs.workload-image }}
+          RELEASE_CHANNEL: ${{ needs.prepare.outputs.release-channel }}
         run: |
           shopt -s nullglob
           for architecture in amd64 arm64; do
@@ -150,6 +151,6 @@ jobs:
             test "${#charm_files[@]}" -eq 1
             charm_output=$(charmcraft upload "${charm_files[0]}" --format json)
             charm_revision=$(printf '%s' "$charm_output" | jq -r '.revision')
-            charmcraft release reductstore-k8s --revision="$charm_revision" --channel="${{ needs.prepare.outputs.release-channel }}" --resource="reductstore-image:$resource_revision"
+            charmcraft release reductstore-k8s --revision="$charm_revision" --channel="$RELEASE_CHANNEL" --resource="reductstore-image:$resource_revision"
             printf -- "- %s: charm \`%s\`, resource \`%s\`\n" "$architecture" "$charm_revision" "$resource_revision" >> "$GITHUB_STEP_SUMMARY"
           done
