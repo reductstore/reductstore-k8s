@@ -97,6 +97,10 @@ charmcraft release reductstore-k8s \
 
 Charm and resource revisions are independent. A rerun can safely recover a partial two-architecture release because Charmhub deduplicates matching uploads; confirm the final channel map with `charmcraft status reductstore-k8s`.
 
+## Security
+
+Security fixes are provided through the latest stable `reductstore-k8s` channel. To report a vulnerability privately, follow the [ReductStore security policy](https://github.com/reductstore/reductstore/security/policy), which provides private GitHub Security Advisory and email reporting channels. Do not report vulnerabilities in public issues, pull requests, or discussions.
+
 ## Other resources
 
 - [Project website](https://www.reduct.store)
