@@ -8,7 +8,7 @@ description: |
   This charm deploys ReductStore inside Kubernetes, with persistent storage and ingress support.
 links:
   website: https://www.reduct.store
-  documentation: https://www.reduct.store/docs
+  documentation: https://github.com/reductstore/reductstore-k8s#readme
   contact: mailto:info@reduct.store
   source: https://github.com/reductstore/reductstore-k8s
 
@@ -73,6 +73,7 @@ requires:
   ingress:
     interface: ingress
     limit: 1
+    optional: true
   catalogue:
     interface: catalogue
     optional: true

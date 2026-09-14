@@ -61,13 +61,7 @@ class ReductstoreCharm(ops.CharmBase):
         if log_level not in VALID_LOG_LEVELS:
             self.unit.status = ops.BlockedStatus(f"invalid log level: '{log_level}'")
             return
-        container = self.unit.get_container("reductstore")
-        try:
-            container.add_layer("reductstore", self._pebble_layer, combine=True)
-            container.replan()
-        except ops.pebble.ConnectionError:
-            self.unit.status = ops.MaintenanceStatus("waiting for Pebble API")
-            event.defer()
+        if not self._replan_workload(event):
             return
         self.unit.status = ops.ActiveStatus()
         logger.debug(
@@ -89,6 +83,8 @@ class ReductstoreCharm(ops.CharmBase):
             self.external_api_url,
             self.external_ui_url,
         )
+        if not self._replan_workload(event):
+            return
         self.catalogue.update_item(self._catalogue_item)
         logger.info("Ingress is ready: %s", event.url)
         self.unit.status = ops.ActiveStatus(f"Ingress at {event.url}")
@@ -104,9 +100,23 @@ class ReductstoreCharm(ops.CharmBase):
             self.external_api_url,
             self.external_ui_url,
         )
+        if not self._replan_workload(event):
+            return
         self.catalogue.update_item(self._catalogue_item)
         logger.warning("Ingress revoked")
-        self.unit.status = ops.MaintenanceStatus("Waiting for ingress")
+        self.unit.status = ops.ActiveStatus()
+
+    def _replan_workload(self, event: ops.EventBase) -> bool:
+        """Apply the current workload layer, deferring when Pebble is unavailable."""
+        container = self.unit.get_container("reductstore")
+        try:
+            container.add_layer("reductstore", self._pebble_layer, combine=True)
+            container.replan()
+        except ops.pebble.ConnectionError:
+            self.unit.status = ops.MaintenanceStatus("waiting for Pebble API")
+            event.defer()
+            return False
+        return True
 
     def _api_base_path(self) -> str:
         path = cast(
@@ -116,7 +126,6 @@ class ReductstoreCharm(ops.CharmBase):
             path = "/" + path
         if len(path) > 1 and path.endswith("/"):
             path = path[:-1]
-        logger.debug("computed api_base_path=%s", path)
         return path
 
     @property
@@ -127,9 +136,7 @@ class ReductstoreCharm(ops.CharmBase):
     def _public_ui_url(self, base_url: str) -> str:
         parts = urlsplit(base_url)
         path = f"{self._api_base_path()}/ui/dashboard"
-        url = parts._replace(path=path, query="", fragment="").geturl()
-        logger.debug("public_ui_url: base=%s -> %s", base_url, url)
-        return url
+        return parts._replace(path=path, query="", fragment="").geturl()
 
     def _on_upgrade_charm(self, event: ops.UpgradeCharmEvent):
         """Handle charm upgrade by restoring ingress state and updating catalogue."""
@@ -166,23 +173,17 @@ class ReductstoreCharm(ops.CharmBase):
     def external_ui_url(self) -> str:
         """Return the externally reachable UI URL, if known."""
         if not self._stored.ingress_url:
-            logger.debug("external_ui_url: no ingress_url stored yet")
             return ""
-        url = self._public_ui_url(self._stored.ingress_url)
-        logger.debug("external_ui_url=%s", url)
-        return url
+        return self._public_ui_url(self._stored.ingress_url)
 
     @property
     def external_api_url(self) -> str:
         """Return the externally reachable API URL, if known."""
         if not self._stored.ingress_url:
-            logger.debug("external_api_url: no ingress_url stored yet")
             return ""
         parts = urlsplit(self._stored.ingress_url)
         path = self._api_base_path()
-        url = urlunsplit((parts.scheme, parts.netloc, path or "/", "", ""))
-        logger.debug("external_api_url=%s", url)
-        return url
+        return urlunsplit((parts.scheme, parts.netloc, path or "/", "", ""))
 
     @property
     def _catalogue_item(self) -> CatalogueItem:
@@ -199,9 +200,6 @@ class ReductstoreCharm(ops.CharmBase):
                     "Server Info": f"{base}/api/v1/info",
                 }
             )
-        logger.debug(
-            "catalogue item: ui_url=%s api_url=%s endpoints=%s", ui_url, api_url, endpoints
-        )
         return CatalogueItem(
             name="ReductStore",
             url=ui_url,
