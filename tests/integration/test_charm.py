@@ -3,7 +3,6 @@
 # See LICENSE file for licensing details.
 
 import logging
-from collections.abc import AsyncIterator
 from pathlib import Path
 
 import aiohttp
@@ -21,7 +20,7 @@ CATALOGUE_APP_NAME = "catalogue-k8s"
 
 
 @pytest_asyncio.fixture(scope="module")
-async def reductstore_deployed(ops_test: OpsTest) -> AsyncIterator[OpsTest]:
+async def reductstore_deployed(ops_test: OpsTest) -> OpsTest:
     """Build and deploy ReductStore once for the integration module."""
     charm = await ops_test.build_charm(".")
     resources = {
@@ -38,10 +37,7 @@ async def reductstore_deployed(ops_test: OpsTest) -> AsyncIterator[OpsTest]:
     await ops_test.model.wait_for_idle(
         apps=[APP_NAME], status="active", raise_on_blocked=True, timeout=1000
     )
-    try:
-        yield ops_test
-    finally:
-        await ops_test.model.disconnect()
+    return ops_test
 
 
 @pytest.mark.abort_on_fail
