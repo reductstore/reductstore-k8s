@@ -26,7 +26,6 @@ jobs:
       checkout-ref: ${{ steps.release.outputs.checkout-ref }}
       release-channel: ${{ steps.release.outputs.release-channel }}
       release-environment: ${{ steps.release.outputs.release-environment }}
-      release-token-secret: ${{ steps.release.outputs.release-token-secret }}
       workload-image: ${{ steps.release.outputs.workload-image }}
       compatibility-override: ${{ steps.release.outputs.compatibility-override }}
     steps:
@@ -54,12 +53,10 @@ jobs:
             git merge-base --is-ancestor "$checkout_ref" origin/main
             release_channel=latest/stable
             release_environment=stable
-            release_token_secret=CHARMHUB_STABLE_TOKEN
           else
             checkout_ref=$SOURCE_SHA
             release_channel=latest/edge
             release_environment=edge
-            release_token_secret=CHARMHUB_EDGE_TOKEN
           fi
           workload_image=$(git show "$checkout_ref:charmcraft.yaml" | sed -n 's/^[[:space:]]*upstream-source:[[:space:]]*//p')
           test -n "$workload_image"
@@ -70,7 +67,7 @@ jobs:
             echo "Stable releases cannot use a floating latest image" >&2
             exit 1
           fi
-          printf 'checkout-ref=%s\nrelease-channel=%s\nrelease-environment=%s\nrelease-token-secret=%s\nworkload-image=%s\ncompatibility-override=%s\n' "$checkout_ref" "$release_channel" "$release_environment" "$release_token_secret" "$workload_image" "$compatibility_override" >> "$GITHUB_OUTPUT"
+          printf 'checkout-ref=%s\nrelease-channel=%s\nrelease-environment=%s\nworkload-image=%s\ncompatibility-override=%s\n' "$checkout_ref" "$release_channel" "$release_environment" "$workload_image" "$compatibility_override" >> "$GITHUB_OUTPUT"
           printf "## Release inputs\n\n- Source: \`%s\`\n- Channel: \`%s\`\n- Workload image: \`%s\`\n- Compatibility override: \`%s\`\n" "$checkout_ref" "$release_channel" "$workload_image" "$compatibility_override" >> "$GITHUB_STEP_SUMMARY"
 
   checks:
@@ -138,22 +135,17 @@ jobs:
           merge-multiple: true
       - name: Install Charmcraft
         run: sudo snap install charmcraft --channel latest/stable --classic
-      - name: Publish both architectures
+      - name: Publish edge architectures
+        if: needs.prepare.outputs.release-environment == 'edge'
         env:
-          CHARMCRAFT_AUTH: ${{ secrets[needs.prepare.outputs.release-token-secret] }}
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_EDGE_TOKEN }}
           WORKLOAD_IMAGE: ${{ needs.prepare.outputs.workload-image }}
           RELEASE_CHANNEL: ${{ needs.prepare.outputs.release-channel }}
-        run: |
-          shopt -s nullglob
-          for architecture in amd64 arm64; do
-            docker pull --platform="linux/$architecture" "$WORKLOAD_IMAGE"
-            image_id=$(docker image inspect --format='{{.Id}}' "$WORKLOAD_IMAGE")
-            resource_output=$(charmcraft upload-resource reductstore-k8s reductstore-image --image="$image_id" --format json)
-            resource_revision=$(printf '%s' "$resource_output" | jq -r '.revision')
-            charm_files=(artifacts/*_"$architecture".charm)
-            test "${#charm_files[@]}" -eq 1
-            charm_output=$(charmcraft upload "${charm_files[0]}" --format json)
-            charm_revision=$(printf '%s' "$charm_output" | jq -r '.revision')
-            charmcraft release reductstore-k8s --revision="$charm_revision" --channel="$RELEASE_CHANNEL" --resource="reductstore-image:$resource_revision"
-            printf -- "- %s: charm \`%s\`, resource \`%s\`\n" "$architecture" "$charm_revision" "$resource_revision" >> "$GITHUB_STEP_SUMMARY"
-          done
+        run: .github/scripts/publish.sh
+      - name: Publish stable architectures
+        if: needs.prepare.outputs.release-environment == 'stable'
+        env:
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_STABLE_TOKEN }}
+          WORKLOAD_IMAGE: ${{ needs.prepare.outputs.workload-image }}
+          RELEASE_CHANNEL: ${{ needs.prepare.outputs.release-channel }}
+        run: .github/scripts/publish.sh
