@@ -135,22 +135,17 @@ jobs:
           merge-multiple: true
       - name: Install Charmcraft
         run: sudo snap install charmcraft --channel latest/stable --classic
-      - name: Publish both architectures
+      - name: Publish edge architectures
+        if: needs.prepare.outputs.release-environment == 'edge'
         env:
-          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_TOKEN }}
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_EDGE_TOKEN }}
           WORKLOAD_IMAGE: ${{ needs.prepare.outputs.workload-image }}
           RELEASE_CHANNEL: ${{ needs.prepare.outputs.release-channel }}
-        run: |
-          shopt -s nullglob
-          for architecture in amd64 arm64; do
-            docker pull --platform="linux/$architecture" "$WORKLOAD_IMAGE"
-            image_id=$(docker image inspect --format='{{.Id}}' "$WORKLOAD_IMAGE")
-            resource_output=$(charmcraft upload-resource reductstore-k8s reductstore-image --image="$image_id" --format json)
-            resource_revision=$(printf '%s' "$resource_output" | jq -r '.revision')
-            charm_files=(artifacts/*_"$architecture".charm)
-            test "${#charm_files[@]}" -eq 1
-            charm_output=$(charmcraft upload "${charm_files[0]}" --format json)
-            charm_revision=$(printf '%s' "$charm_output" | jq -r '.revision')
-            charmcraft release reductstore-k8s --revision="$charm_revision" --channel="$RELEASE_CHANNEL" --resource="reductstore-image:$resource_revision"
-            printf -- "- %s: charm \`%s\`, resource \`%s\`\n" "$architecture" "$charm_revision" "$resource_revision" >> "$GITHUB_STEP_SUMMARY"
-          done
+        run: .github/scripts/publish.sh
+      - name: Publish stable architectures
+        if: needs.prepare.outputs.release-environment == 'stable'
+        env:
+          CHARMCRAFT_AUTH: ${{ secrets.CHARMHUB_STABLE_TOKEN }}
+          WORKLOAD_IMAGE: ${{ needs.prepare.outputs.workload-image }}
+          RELEASE_CHANNEL: ${{ needs.prepare.outputs.release-channel }}
+        run: .github/scripts/publish.sh

@@ -111,7 +111,12 @@ To republish an existing release tag, use **Actions > Publish release > Run work
 
 ### Repository setup
 
-Before enabling publication, a repository administrator must create the `stable` GitHub environment and configure a required reviewer. Create a package-scoped Charmhub token with `package-manage` permission limited to the `reductstore-k8s` package and `latest/stable` channel. Store it only as the `CHARMHUB_TOKEN` environment secret on `stable`, then rotate it before it expires. No other Actions secret is used for publication.
+Before enabling publication, a repository administrator must create separate `edge` and `stable` GitHub environments. Create one package-scoped Charmhub token for each environment with `package-manage` permission limited to the `reductstore-k8s` package and the environment's release channel:
+
+- store a token limited to `latest/edge` as the `CHARMHUB_EDGE_TOKEN` environment secret on `edge`;
+- store a separate token limited to `latest/stable` as the `CHARMHUB_STABLE_TOKEN` environment secret on `stable`, and configure the required stable-release reviewer there.
+
+Do not configure these tokens as repository-level secrets: keeping both credentials environment-scoped prevents an edge publication from receiving the stable-only credential. Rotate both tokens before they expire. No other Actions secret is used for publication.
 
 The release workflow derives the workload image from the tagged `charmcraft.yaml` and rejects floating `latest` images. The existing `v1.0.0` tag is the sole compatibility exception: its source metadata is asserted to contain `reduct/store:latest`, but the runner temporarily uses `reduct/store:v1.20.11` for testing and publication. Future releases must pin their reviewed image in `charmcraft.yaml`.
 
